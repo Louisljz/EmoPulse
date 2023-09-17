@@ -1,5 +1,5 @@
 streamlit_webrtc
-st_audiorec
+streamlit-audiorec
 deepface
 gtts
 assemblyai
