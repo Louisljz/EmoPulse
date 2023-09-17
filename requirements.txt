@@ -1,2 +1,7 @@
 streamlit_webrtc
+st_audiorec
 deepface
+gtts
+assemblyai
+langchain
+clarifai

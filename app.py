@@ -1,14 +1,56 @@
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer
+from st_audiorec import st_audiorec
+
+from io import BytesIO
 import threading
 import time
-from deepface import DeepFace
+import os
 
-st.set_page_config('Face Emotion Monitoring')
-st.title('Face Emotion Monitoring')
+from gtts import gTTS
+import assemblyai as aai
+from deepface import DeepFace
+from langchain.llms import Clarifai
+from langchain.prompts.chat import ChatPromptTemplate
+from langchain.chains import LLMChain
+
+system_role = '''
+You are a psychological counselor that takes in emotion 
+tracking data, personal info, and user thoughts on mind.
+You are expected to give a descriptive response explaining
+what different emotion values mean for them (if given), and write relevant
+suggestions on how to cope with their negative feelings (if any).
+
+There may be 3 inputs at most, ignore if any value is empty/none.
+'''
+
+human_template = '''
+1. Emotion Dictionary Data Monitored by AI from Webcam
+- Duration Key represents how long inference has gone
+- Emotion Key elaborates composition of each emotion attribute
+- Each value represent the number of frames that AI classifies as that particular emotion
+DATA: {emo_tracker}
+2. Personal Info: {p_info}
+3. Thoughts on Mind: {thoughts}
+'''
+
+llm_prompt = ChatPromptTemplate.from_messages([
+    ("system", system_role),
+    ("human", human_template),
+])
+
+llm_model = Clarifai(pat=st.secrets['ClarifaiToken'], user_id='openai', 
+                   app_id='chat-completion', model_id='GPT-4')
+
+llm_chain = LLMChain(llm=llm_model, prompt=llm_prompt, verbose=True)
+
+aai.settings.api_key = st.secrets['AssemblyAIToken']
+transcriber = aai.Transcriber()
 
 lock = threading.Lock()
 img_container = {"img": None}
+if 'tracker' not in st.session_state:
+    st.session_state['tracker'] = {'emotions': {}, 'duration': 0}
 
 def video_frame_callback(frame):
     img = frame.to_ndarray(format="bgr24")
@@ -17,70 +59,131 @@ def video_frame_callback(frame):
     
     return frame
 
-stream = webrtc_streamer(key="stream", video_frame_callback=video_frame_callback,
-                         media_stream_constraints={'video': True, 'audio': False},
-                         rtc_configuration={
-                            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-                        })
+st.set_page_config('EmoCope')
+st.title('EmoCope')
 
-metrics_holder = st.empty()
-message = st.empty()
-tracker = {}
-start = True
+with st.expander('Expand for Help!'):
+    st.write('1. Press Start, and AI will monitor your emotions overtime')
+    st.write('2. Click Stop if AI alert is correct')
+    st.write('3. Go to Counsel Tab to seek for psycological advice')
 
-while stream.state.playing:
-    with lock:
-        img = img_container["img"]
-    if img is not None:
-        try:
-            faces = DeepFace.analyze(img_path = img, actions = ['emotion'],
-                                    detector_backend='ssd', silent=True)
-            if len(faces) == 1:
-                if start:
-                    start_time = time.time()
-                    start = False
+monitor_tab, counsel_tab = st.tabs(['Monitoring', 'Counseling'])
 
-                cur_emo = faces[0]['dominant_emotion']
-                attributes = faces[0]['emotion']
+with monitor_tab:
+    stream = webrtc_streamer(key="stream", video_frame_callback=video_frame_callback,
+                            media_stream_constraints={'video': True, 'audio': False},
+                            rtc_configuration={
+                                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+                            })
 
-                with metrics_holder:
-                    cols = st.columns(7)
+    metrics_holder = st.empty()
+    message = st.empty()
+    start = True
 
-                    for idx, (emo, score) in enumerate(attributes.items()):
-                        value = f'{round(score)}%'
-                        if emo == cur_emo:
-                            cols[idx].metric(emo, value, 'Dominant')
-                        else:
-                            cols[idx].metric(emo, value)
+    while stream.state.playing:
+        with lock:
+            img = img_container["img"]
+        if img is not None:
+            try:
+                faces = DeepFace.analyze(img_path = img, actions = ['emotion'],
+                                        detector_backend='ssd', silent=True)
+                if len(faces) == 1:
+                    if start:
+                        start_time = time.time()
+                        start = False
 
-                if cur_emo in tracker.keys():
-                    tracker[cur_emo] += 1
-                else:
-                    tracker[cur_emo] = 1
+                    cur_emo = faces[0]['dominant_emotion']
+                    attributes = faces[0]['emotion']
 
-                cur_time = time.time()
-                duration = round(cur_time - start_time)
+                    with metrics_holder:
+                        cols = st.columns(7)
 
-                if duration > 5:
-                    dom_emo = max(tracker, key=tracker.get)
-                    if dom_emo in ['angry', 'fear', 'sad']:
-                        dom_frames = tracker[dom_emo]
-                        total_frames = sum(tracker.values())
-                        stats = round(dom_frames / total_frames * 100)
-                        if stats > 50:
-                            message.error(f'''High Stress Levels Detected!
-                                        {stats}% {dom_emo} in {duration} secs!
-                                        ''')
-                        else:
-                            message.warning('Low Stress Levels Detected!')
+                        for idx, (emo, score) in enumerate(attributes.items()):
+                            value = f'{round(score)}%'
+                            if emo == cur_emo:
+                                cols[idx].metric(emo, value, 'Dominant')
+                            else:
+                                cols[idx].metric(emo, value)
+
+                    tracker = st.session_state['tracker']['emotions']
+
+                    if cur_emo in tracker.keys():
+                        tracker[cur_emo] += 1
                     else:
-                        message.success('No Stress Detected!')
+                        tracker[cur_emo] = 1
+
+                    cur_time = time.time()
+                    duration = round(cur_time - start_time)
+                    st.session_state['tracker']['duration'] = duration
+
+                    if duration > 5:
+                        dom_emo = max(tracker, key=tracker.get)
+                        if dom_emo in ['angry', 'fear', 'sad']:
+                            dom_frames = tracker[dom_emo]
+                            total_frames = sum(tracker.values())
+                            stats = round(dom_frames / total_frames * 100)
+                            if stats > 50:
+                                message.error(f'''High Stress Levels Detected!
+                                            {stats}% {dom_emo} in {duration} secs!''')
+                            else:
+                                message.warning('Low Stress Levels Detected!')
+                        else:
+                            message.success('No Stress Detected!')
+
+                    else:
+                        message.info('Analyzing Emotions..')
 
                 else:
-                    message.info('Analyzing Emotions..')
+                    message.error('Multiple Faces Detected!')
+
+            except ValueError:
+                message.error('No Face Detected!')
+
+
+with counsel_tab:
+    tracker = st.session_state['tracker']
+    if tracker['duration'] > 0:
+        use = st.toggle('Use Emotion Monitoring Data?')
+    else:
+        use = False
+        st.info('Emotion Monitoring Data not Available!')
+    
+    personalize = st.toggle('Personalize counseling?')
+    if personalize:
+        with st.expander('Personalization'):
+            name = st.text_input('Name')
+            age = st.number_input('Age', 1, 100)
+            gender = st.radio('Gender', ['Male', 'Female'], horizontal=True)
+
+        p_info = f'Name: {name}; Age: {age}; Gender: {gender}'
+
+    tell = st.toggle("Tell what's on your mind?")
+    if tell:
+        with st.expander('Context'):
+            mode = st.radio('Mode', ['Speak', 'Type'])
+            if mode == 'Speak':
+                audio_bytes = st_audiorec()
+                if audio_bytes:
+                    file_name = 'temp_transcript.wav'
+                    with open(file_name, "wb") as f:
+                        f.write(audio_bytes)
+                    
+                    context = transcriber.transcribe(file_name).text
+                    st.write(context)
+                    os.remove(file_name)
 
             else:
-                message.error('Multiple Faces Detected!')
+                context = st.text_area('Text to Analyze')
 
-        except ValueError:
-            message.error('No Face Detected!')
+    if use or tell:
+        counsel = st.button('Counsel')
+        if counsel:
+            response = llm_chain.run(emo_tracker=[tracker['emotions'] if use else None],
+                        p_info=[p_info if personalize else None],
+                        thoughts=[context if tell else None])
+            st.write(response)
+
+            speech_bytes = BytesIO()
+            tts = gTTS(response)
+            tts.write_to_fp(speech_bytes)
+            st.audio(speech_bytes)
