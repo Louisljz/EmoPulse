@@ -7,10 +7,10 @@ import threading
 import time
 import os
 
-from gtts import gTTS
-import assemblyai as aai
-from deepface import DeepFace
-from langchain.llms import Clarifai
+from gtts import gTTS # text to speech
+import assemblyai as aai # speech to text
+from deepface import DeepFace # emotion recognition
+from langchain.llms import Clarifai # GPT-4
 from langchain.prompts.chat import ChatPromptTemplate
 from langchain.chains import LLMChain
 
@@ -50,7 +50,7 @@ transcriber = aai.Transcriber()
 lock = threading.Lock()
 img_container = {"img": None}
 if 'tracker' not in st.session_state:
-    st.session_state['tracker'] = {'emotions': {}, 'duration': 0}
+    st.session_state['tracker'] = {'emotions': {}, 'duration': 0, 'stress': {}}
 
 def video_frame_callback(frame):
     img = frame.to_ndarray(format="bgr24")
@@ -76,7 +76,8 @@ with monitor_tab:
                                 "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
                             })
 
-    metrics_holder = st.empty()
+    emotion_metrics = st.empty()
+    pulse_metrics = st.empty()
     message = st.empty()
     start = True
 
@@ -92,10 +93,14 @@ with monitor_tab:
                         start_time = time.time()
                         start = False
 
+                    bbox = faces[0]['region'] # x, y, w, h
+                    # cropping
+                    # image processing
                     cur_emo = faces[0]['dominant_emotion']
                     attributes = faces[0]['emotion']
 
-                    with metrics_holder:
+                    # live metric display
+                    with emotion_metrics:
                         cols = st.columns(7)
 
                         for idx, (emo, score) in enumerate(attributes.items()):
@@ -105,18 +110,20 @@ with monitor_tab:
                             else:
                                 cols[idx].metric(emo, value)
 
-                    tracker = st.session_state['tracker']['emotions']
+                    tracker = st.session_state['tracker']
 
-                    if cur_emo in tracker.keys():
-                        tracker[cur_emo] += 1
+                    if cur_emo in tracker['emotions'].keys():
+                        tracker['emotions'][cur_emo] += 1
                     else:
-                        tracker[cur_emo] = 1
+                        tracker['emotions'][cur_emo] = 1
+
+                    # track stress, bpm, hrv
 
                     cur_time = time.time()
                     duration = round(cur_time - start_time)
                     st.session_state['tracker']['duration'] = duration
 
-                    if duration > 5:
+                    if duration > 5: # seconds
                         dom_emo = max(tracker, key=tracker.get)
                         if dom_emo in ['angry', 'fear', 'sad']:
                             dom_frames = tracker[dom_emo]
@@ -147,6 +154,8 @@ with counsel_tab:
     else:
         use = False
         st.info('Emotion Monitoring Data not Available!')
+
+    # Retrieve stress index data? 
     
     personalize = st.toggle('Personalize counseling?')
     if personalize:
