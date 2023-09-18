@@ -1,7 +1,8 @@
-streamlit_webrtc
-st_audiorec
-deepface
-gtts
-assemblyai
-langchain
-clarifai
+streamlit==1.26.0
+streamlit-audiorec==0.1.3
+streamlit-webrtc==0.47.0
+deepface==0.0.79
+gTTS==2.3.2
+assemblyai==0.17.0
+langchain==0.0.292
+clarifai==9.8.1
