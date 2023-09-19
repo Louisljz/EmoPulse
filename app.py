@@ -25,6 +25,11 @@ from langchain.chains import LLMChain
 # Heart Metric Calculation
 from helpers import HeartMetricsCalculator
 
+# TURN Server for StreamlitWebRTC
+from twilio.rest import Client
+
+
+
 # Load Prompt Templates and Instructions
 with open('text/system_role.txt', 'r') as f:
     system_role = f.read()
@@ -40,7 +45,7 @@ llm_prompt = ChatPromptTemplate.from_messages([
     ("human", human_template),
 ])
 
-# Initialize Models
+# Initialize Objects
 llm_model = Clarifai(pat=st.secrets['ClarifaiToken'], user_id='openai', 
                    app_id='chat-completion', model_id='GPT-4')
 
@@ -50,6 +55,10 @@ aai.settings.api_key = st.secrets['AssemblyAIToken']
 transcriber = aai.Transcriber()
 
 heart_calculator = HeartMetricsCalculator()
+
+# Connect TURN Server
+client = Client(st.secrets['TwilioAccountSID'], st.secrets['TwilioAuthToken'])
+token = client.tokens.create()
 
 # Initialize threading and session states
 lock = threading.Lock()
@@ -111,8 +120,7 @@ with monitor_tab:
     st.info('Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies')
     stream = webrtc_streamer(key="stream", video_frame_callback=process_feed,
                             media_stream_constraints={'video': True, 'audio': False},
-                            rtc_configuration={
-                                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                            rtc_configuration={"iceServers": token.ice_servers}
                             )
     
     # Live UI output
