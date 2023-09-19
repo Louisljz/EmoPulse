@@ -111,8 +111,8 @@ with monitor_tab:
     st.info('Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies')
     stream = webrtc_streamer(key="stream", video_frame_callback=process_feed,
                             media_stream_constraints={'video': True, 'audio': False},
-                            # rtc_configuration={
-                            #     "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                            rtc_configuration={
+                                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
                             )
     
     # Live UI output
@@ -216,7 +216,6 @@ with counsel_tab:
         with st.expander('User Input'):
             mode = st.radio('Mode', ['Speak', 'Type'])
             if mode == 'Speak':
-                st.write('Click Counsel button directly once you finish speaking.')
                 # Build custom audio recorder widget
                 audio_bytes = st_audiorec()
                 if audio_bytes:
