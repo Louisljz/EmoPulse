@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 from helpers import HeartMetricsCalculator
 heart_calculator = HeartMetricsCalculator()
 
-
 from io import BytesIO
 import threading
 import time
