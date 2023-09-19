@@ -1,64 +1,46 @@
+# Streamlit Widget Components
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer
 from st_audiorec import st_audiorec
 
-from scipy.signal import find_peaks, detrend
-from scipy.signal import find_peaks, detrend, butter, filtfilt
-from scipy.fftpack import fft, fftfreq
-import matplotlib.pyplot as plt
-from helpers import HeartMetricsCalculator
-heart_calculator = HeartMetricsCalculator()
-
+# Python built-in modules
+from collections import Counter
 from io import BytesIO
 import threading
-import time
 import os
-import numpy as np
-import cv2
 
+# Computer Vision and Image Processing
+import cv2
+from deepface import DeepFace # emotion recognition
+
+# TTS and STT
 from gtts import gTTS # text to speech
 import assemblyai as aai # speech to text
-from deepface import DeepFace # emotion recognition
+
+# LLMs
 from langchain.llms import Clarifai # GPT-4
 from langchain.prompts.chat import ChatPromptTemplate
 from langchain.chains import LLMChain
 
-system_role = '''
-You are a psychological counselor that takes in emotion 
-tracking data, personal info, and user thoughts on mind.
-You are expected to give a descriptive response explaining
-what different emotion values mean for them (if given), and write relevant
-suggestions on how to cope with their negative feelings (if any).
+# Heart Metric Calculation
+from helpers import HeartMetricsCalculator
 
-There may be 3 inputs at most, ignore if any value is empty/none.
-Give separate analysis for emotional analysis and Heart / HRV Data and analyse them 
-together to get insights using your knowledge and 
-mention them and indicate what is the range and how to analyse stress from them
-and why you intepreted it this way.
-'''
+# Load Prompt Templates and Instructions
+with open('text/system_role.txt', 'r') as f:
+    system_role = f.read()
 
-human_template = '''
-1. Emotion Dictionary Data Monitored by AI from Webcam:
-- Duration Key represents how long inference has gone.
-- Emotion Key elaborates composition of each emotion attribute.
-- Each value represents the number of frames that AI classifies as that particular emotion.
-DATA: {emo_tracker}
-2. Personal Info: {p_info}
-3. Thoughts on Mind: {thoughts}
-4. Estimated Heart Data:
-- Heart Rate: {heart_rate} BPM
-- HRV (SDNN): {sdnn}
-- RMSSD: {rmssd}
-- Baevsky Stress Index (BSI): {bsi}
-- LF/HF Ratio: {lf_hf_ratio}
-'''
+with open('text/human_template.txt', 'r') as f:
+    human_template = f.read()
 
+with open('text/instructions.txt', 'r') as f:
+    instructions = f.read()
 
 llm_prompt = ChatPromptTemplate.from_messages([
     ("system", system_role),
     ("human", human_template),
 ])
 
+# Initialize Models
 llm_model = Clarifai(pat=st.secrets['ClarifaiToken'], user_id='openai', 
                    app_id='chat-completion', model_id='GPT-4')
 
@@ -67,151 +49,160 @@ llm_chain = LLMChain(llm=llm_model, prompt=llm_prompt, verbose=True)
 aai.settings.api_key = st.secrets['AssemblyAIToken']
 transcriber = aai.Transcriber()
 
+heart_calculator = HeartMetricsCalculator()
+
+# Initialize threading and session states
 lock = threading.Lock()
-img_container = {"img": None}
+img_container = {'image': None}
 
 if 'tracker' not in st.session_state:
-    st.session_state['tracker'] = {'emotions': {}, 'duration': 0, 'stress': {}}
+    st.session_state.tracker = {'roi_frames': [], 'emotion': []}
 
-if 'roi_frames' not in st.session_state:
-    st.session_state.roi_frames = []
+if 'report' not in st.session_state:
+    st.session_state.report = {'emotion': {}, 'heart': {}}
 
-
-processed_frames = []
-def video_frame_callback(frame):
-    # st.write("Callback activated!")  
-    img = frame.to_ndarray(format="bgr24")
+# video feed subthread
+def process_feed(frame):
     with lock:
-        img_container["img"] = img
-    processed_frames.append(img)   # Add this line
+        img_container['image'] = frame.to_ndarray(format="bgr24")
     return frame
 
+# generate emotion report
+def count_percent(labels):
+    label_counts = Counter(labels)
+    total_labels = len(labels)
+    label_percent = {}
+
+    for label, count in label_counts.items():
+        percentage = (count / total_labels) * 100
+        label_percent[label] = round(percentage)
+
+    return label_percent
+
+# display tracking reports
+def display_emotion_report():
+    emotion_report = st.session_state.report['emotion']
+    st.subheader('Percentage of different emotions observed during monitoring')
+
+    cols = st.columns(len(emotion_report.keys()))
+    for i, (emo, percent) in enumerate(emotion_report.items()):
+        cols[i].metric(emo, f'{percent}%')
+
+def display_heart_report():
+    heart_report = st.session_state.report['heart']
+    st.subheader('Heart Metric Report')
+
+    st.write(f"Estimated Heart Rate: **{heart_report['heart_rate']}** BPM")
+    st.write(f"HRV: **{heart_report['sdnn']}**: A measure of heart rate variability, indicating the overall variability in heartbeats")
+    st.write(f"RMSSD: **{heart_report['rmssd']}**: A measure of parasympathetic nervous system activity")
+    st.write(f"Baevsky Stress Index (BSI): **{heart_report['bsi']}**: Stress level based on heart rate variability.")
+    st.write(f"LF/HF Ratio: **{heart_report['lf_hf_ratio']}**: Balance between sympathetic and parasympathetic nervous system activity.")
+
+# Build UI
 st.set_page_config('EmoPulse')
 st.title('EmoPulse')
 
-with st.expander('Expand for Help!'):
-    st.write('1. Press Start, and AI will monitor your emotions overtime')
-    st.write('2. Click Stop if AI alert is correct')
-    st.write('3. Go to Counsel Tab to seek for psycological advice')
+with st.expander('Instructions'):
+    st.write(instructions)
 
 monitor_tab, counsel_tab = st.tabs(['Monitoring', 'Counseling'])
 
-roi_frames = []
 with monitor_tab:
-    stream = webrtc_streamer(key="stream", video_frame_callback=video_frame_callback,
+    st.info('Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies')
+    stream = webrtc_streamer(key="stream", video_frame_callback=process_feed,
                             media_stream_constraints={'video': True, 'audio': False},
-                            rtc_configuration={
-                                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-                            })
+                            # rtc_configuration={
+                            #     "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                            )
+    
+    # Live UI output
+    display = st.empty()
 
-    emotion_metrics = st.empty()
-    pulse_metrics = st.empty()
-    message = st.empty()
-    start = True
-    i = 0
     while stream.state.playing:
+        # Get image from subthread
         with lock:
-            img = img_container["img"]
-        if img is not None:
-            try:
-                faces = DeepFace.analyze(img_path = img, actions = ['emotion'],
+            image = img_container['image']
+        if image is not None:
+            try: 
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                # Run Emotion Recognition
+                faces = DeepFace.analyze(img_path = image, actions = ['emotion'],
                                         detector_backend='ssd', silent=True)
+
                 if len(faces) == 1:
-                    if start:
-                        start_time = time.time()
-                        start = False
+                    box = faces[0]['region']
+                    emo = faces[0]['dominant_emotion']
 
-                    bbox = faces[0]['region'] # x, y, w, h
+                    x1, y1, w, h = box['x'], box['y'], box['w'], box['h']
+                    x2, y2 = x1 + w, y1 + h
 
-                    # cropping
-                    roi = img[bbox['y']:bbox['y']+bbox['h']//4, bbox['x']:bbox['x']+bbox['w']]
-                    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                   
-                    st.session_state.roi_frames.append(roi)
-                    # st.write("Number of frames: ", len(st.session_state.roi_frames))
+                    # Calculate forehead region coordinates
+                    roi_y1 = y1 + (h // 8)
+                    roi_y2 = y1 + (h // 4)
+                    roi_x1 = x1 + (w // 3)
+                    roi_x2 = x2 - (w // 3)
 
+                    # Extract green channel
+                    forehead = image[roi_y1:roi_y2, roi_x1:roi_x2, 1]
 
-                    # st.write("Frame number {i}: ", roi_frames[i])
-                    i = i +1
-                    # image processing
-                    cur_emo = faces[0]['dominant_emotion']
-                    attributes = faces[0]['emotion']
+                    # Cropping and annotation for display
+                    cv2.rectangle(image, (roi_x1, roi_y1), (roi_x2, roi_y2), (255, 0, 0), 2)
+                    face = image[y1:y2, x1:x2]
 
-                    # live metric display
-                    with emotion_metrics:
-                        cols = st.columns(7)
+                    display.image(image=face, caption=emo)
 
-                        for idx, (emo, score) in enumerate(attributes.items()):
-                            value = f'{round(score)}%'
-                            if emo == cur_emo:
-                                cols[idx].metric(emo, value, 'Dominant')
-                            else:
-                                cols[idx].metric(emo, value)
-
-                    tracker = st.session_state['tracker']
-
-                    if cur_emo in tracker['emotions'].keys():
-                        tracker['emotions'][cur_emo] += 1
-                    else:
-                        tracker['emotions'][cur_emo] = 1
-
-                    cur_time = time.time()
-                    duration = round(cur_time - start_time)
-                    st.session_state['tracker']['duration'] = duration
-
-                    if duration > 5: # seconds
-                        # dom_emo = max(tracker, key=tracker.get)
-                        dom_emo = max(tracker['emotions'], key=tracker['emotions'].get)
-
-                        if dom_emo in ['angry', 'fear', 'sad']:
-                            dom_frames = tracker['emotions'][dom_emo]
-                            total_frames = sum(tracker['emotions'].values())
-                            stats = round(dom_frames / total_frames * 100)
-                            if stats > 50:
-                                message.error(f'''High Stress Levels Detected!
-                                            {stats}% {dom_emo} in {duration} secs!''')
-                            else:
-                                message.warning('Low Stress Levels Detected!')
-                        else:
-                            message.success('No Stress Detected!')
-
-                    else:
-                        message.info('Analyzing Emotions..')
+                    # Track emotion and save forehead frames for post-processing
+                    st.session_state.tracker['roi_frames'].append(forehead)
+                    st.session_state.tracker['emotion'].append(emo)
 
                 else:
-                    message.error('Multiple Faces Detected!')
-
+                    display.warning('Multiple Faces Detected!')
+            
             except ValueError:
-                message.error('No Face Detected!')
+                display.warning('No Face Detected!')
 
-# st.write("Number of frames: ", len(st.session_state.roi_frames))
-avg_heart_rate, sdnn, rmssd, bsi, lf_hf_ratio = heart_calculator.estimate_heart_rate(st.session_state.roi_frames)
-if avg_heart_rate > 0:
-    st.write(f"Estimated Heart Rate: {np.round(avg_heart_rate,2)} BPM")
-    st.write(f"HRV: {sdnn:.2f}: A measure of heart rate variability, indicating the overall variability in heartbeats")
-    st.write(f"RMSSD: {rmssd:.2f}: A measure of parasympathetic nervous system activity")
-    st.write(f"Baevsky Stress Index (BSI): {bsi:.2f}: - stress level based on heart rate variability.")
-    st.write(f"LF/HF Ratio: {lf_hf_ratio:.2f}: - Balance between sympathetic and parasympathetic nervous system activity.")
+    # Generate and save reports if data is sufficient
+    if st.session_state.tracker['roi_frames']:
+        emo_percent = count_percent(st.session_state.tracker['emotion'])
+        st.session_state.report['emotion'] = emo_percent
+        try:
+            avg_heart_rate, sdnn, rmssd, bsi, lf_hf_ratio = heart_calculator.estimate_heart_rate(st.session_state.tracker['roi_frames'])
+            st.session_state.report['heart'] = {
+                                                    "heart_rate": round(avg_heart_rate, 2),
+                                                    "sdnn": round(sdnn, 2),
+                                                    "rmssd": round(rmssd, 2),
+                                                    "bsi": round(bsi, 2),
+                                                    "lf_hf_ratio": round(lf_hf_ratio, 2)
+                                                }
+        except ValueError:
+            st.warning('Heart Metrics cannot be generated due to lack of Pulse Data')
+    
+    if st.session_state.report['emotion']:
+        display_emotion_report()
+        
+    if st.session_state.report['heart']:
+        display_heart_report()
 
-heart_metrics = {
-                "heart_rate": avg_heart_rate,
-                "sdnn": sdnn,
-                "rmssd": rmssd,
-                "bsi": bsi,
-                "lf_hf_ratio": lf_hf_ratio
-            }
 
 with counsel_tab:
-    tracker = st.session_state['tracker']
-    if tracker['duration'] > 0:
-        use = st.toggle('Use Emotion Monitoring Data?')
+    # User can choose what data to include in LLM prompt
+    if st.session_state.report['heart']:
+        useHeart = st.toggle('Send Heart Metrics Report?')
+        with st.expander('Heart Metrics Report'):
+            display_heart_report()
     else:
-        use = False
-        st.info('Emotion Monitoring Data not Available!')
+        useHeart = False
+        st.info('Heart Metrics Report not Available!')
 
-    # Retrieve stress index data? 
+    if st.session_state.report['emotion']:
+        useEmotion = st.toggle('Send Emotion Tracking Report?')
+        with st.expander('Emotion Tracking Report'):
+            display_emotion_report()
+    else:
+        useEmotion = False
+        st.info('Emotion Tracking Report not Available!')
     
-    personalize = st.toggle('Personalize counseling?')
+    personalize = st.toggle('Personalize information?')
     if personalize:
         with st.expander('Personalization'):
             name = st.text_input('Name')
@@ -220,47 +211,44 @@ with counsel_tab:
 
         p_info = f'Name: {name}; Age: {age}; Gender: {gender}'
 
-    tell = st.toggle("Tell what's on your mind?")
+    tell = st.toggle("Tell me what's on your mind?")
     if tell:
-        with st.expander('Context'):
+        with st.expander('User Input'):
             mode = st.radio('Mode', ['Speak', 'Type'])
             if mode == 'Speak':
+                st.write('Click Counsel button directly once you finish speaking.')
+                # Build custom audio recorder widget
                 audio_bytes = st_audiorec()
                 if audio_bytes:
                     file_name = 'temp_transcript.wav'
+                    # Save audio to temp file
                     with open(file_name, "wb") as f:
                         f.write(audio_bytes)
                     
-                    context = transcriber.transcribe(file_name).text
-                    st.write(context)
+                    # speech to text
+                    user_input = transcriber.transcribe(file_name).text
+                    st.write(user_input)
                     os.remove(file_name)
 
             else:
-                context = st.text_area('Text to Analyze')
+                user_input = st.text_area('Text to Analyze')
 
-    if use or tell:
+    # If minimum options selected
+    if useEmotion or useHeart or tell:
         counsel = st.button('Counsel')
         if counsel:
-            # st.write("heart_metrics:  ",heart_metrics)
+            # Await response from LLM
             response = llm_chain.run(
-                emo_tracker=tracker['emotions'] if use else None,
+                emotion_report=st.session_state.report['emotion'] if useEmotion else None,
+                heart_report=st.session_state.report['heart'] if useHeart else None,
                 p_info=p_info if personalize else None,
-                thoughts=context if tell else None,
-                heart_rate=heart_metrics["heart_rate"],
-                sdnn=heart_metrics["sdnn"],
-                rmssd=heart_metrics["rmssd"],
-                bsi=heart_metrics["bsi"],
-                lf_hf_ratio=heart_metrics["lf_hf_ratio"]
-                )
+                thoughts=user_input if tell else None,
+            )
     
             st.write(response)
 
+            # Text to Speech
             speech_bytes = BytesIO()
             tts = gTTS(response)
             tts.write_to_fp(speech_bytes)
             st.audio(speech_bytes)
- 
-            
-            
-            
-            
