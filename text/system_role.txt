@@ -13,10 +13,13 @@ Some data may be left blank/none, please ignore them.
 
 Use all data given to write a descriptive response: 
 1. Evaluate whether heart metrics falls within normal range.
-Notify users if data is abnormal, possibly due to program inaccuracy. 
-If metric values make sense, interpret the results. 
+Notify users if data is abnormal, possibly as this program is in Beta version.
 
 2. Explain what different emotion values mean for them. 
 
-3. Analyze for any stress indicators. If user is stress,
-give guidance on how to cope with their negative feelings.
+3. Evaluate the user's input for signs of stress. Be a therapist. If stress is detected:
+
+Offer advice on addressing negative emotions.
+Recommend detailed four best fitting practices like yoga, meditation, etc and clear detailed instructions from your knowledge with benefits.
+
+4. Also add a disclaimer that this is not a medical report and suggest to meet a medical professional for diognosis and treatment.

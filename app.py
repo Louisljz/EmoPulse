@@ -106,6 +106,7 @@ def display_heart_report():
     st.write(f"RMSSD: **{heart_report['rmssd']}**: A measure of parasympathetic nervous system activity")
     st.write(f"Baevsky Stress Index (BSI): **{heart_report['bsi']}**: Stress level based on heart rate variability.")
     st.write(f"LF/HF Ratio: **{heart_report['lf_hf_ratio']}**: Balance between sympathetic and parasympathetic nervous system activity.")
+    st.write(f"Click counseling tab above to get detailed report")
 
 # Build UI
 st.set_page_config('EmoPulse')
@@ -117,7 +118,7 @@ with st.expander('Instructions'):
 monitor_tab, counsel_tab = st.tabs(['Monitoring', 'Counseling'])
 
 with monitor_tab:
-    st.info('Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies')
+    st.info('Record for minimum 1 min. Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies')
     stream = webrtc_streamer(key="stream", video_frame_callback=process_feed,
                             media_stream_constraints={'video': True, 'audio': False},
                             rtc_configuration={"iceServers": token.ice_servers}
@@ -220,6 +221,7 @@ with counsel_tab:
         p_info = f'Name: {name}; Age: {age}; Gender: {gender}'
 
     tell = st.toggle("Tell me what's on your mind?")
+    user_input = "" 
     if tell:
         with st.expander('User Input'):
             mode = st.radio('Mode', ['Speak', 'Type'])
@@ -244,6 +246,9 @@ with counsel_tab:
     if useEmotion or useHeart or tell:
         counsel = st.button('Counsel')
         if counsel:
+            wait = st.empty()
+            wait.info("We are working on your report... your patience is highly appreciated.")
+
             # Await response from LLM
             response = llm_chain.run(
                 emotion_report=st.session_state.report['emotion'] if useEmotion else None,
@@ -251,7 +256,8 @@ with counsel_tab:
                 p_info=p_info if personalize else None,
                 thoughts=user_input if tell else None,
             )
-    
+            
+            wait.empty()
             st.write(response)
 
             # Text to Speech
