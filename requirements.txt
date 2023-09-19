@@ -6,3 +6,5 @@ gTTS==2.3.2
 assemblyai==0.17.0
 langchain==0.0.292
 clarifai==9.8.1
+dlib
+matplotlib
