@@ -35,19 +35,50 @@ EmoPulse-main/
     └── system_role.txt
 ```
 
-## Mission
-To bridge cutting-edge technology with health by capturing intricate heart data, facial emotion and providing actionable insights through large language models (LLM).
+## Running the App Locally
+
+1. **Clone the Repository**:  
+   ```
+   git clone https://github.com/Louisljz/EmoPulse.git
+   ```
+
+2. **Install Virtual Environment**:  
+   ```
+   python -m venv venv
+   ```
+   Activate the virtual environment:
+   - On Windows: `venv\Scripts\Activate`
+   - On macOS and Linux: `source venv/bin/activate`
+
+3. **Install Required Packages**:  
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. **Run the Streamlit App**:  
+   ```
+   streamlit run app.py
+   ```
+
+5. **Open the App**:  
+   The app should now be running. Open your web browser and go to `http://localhost:8501/` to interact with the app.
+
+## Applications
+
+1. **Mental Health Assessment**: Useful for psychologists and therapists.
+2. **Fitness and Wellness**: Monitor cardiovascular health.
+3. **Telehealth Services**: Provide real-time data to healthcare providers.
 
 ## User Trust & Ethics
-- All data processed within the device for enhanced privacy.
-- No external data storage or transmission; immediate deletion after processing.
+- Immediate deletion after processing speech transcription.
+- Encrypted data transmission to trusted sources.
 
 ## Future Directions
 - Mobile applications for iOS and Android
 - Expanded monitoring capabilities, including blood pressure and respiratory rate
 
 ## Disclaimer
-- Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies
+- Emotion Recognition and Pulse Signal Processing are still in BETA stage, so it may present some inaccuracies.
 - Factors like room lighting and stability significantly impact the readings.
 
 ## Contact
